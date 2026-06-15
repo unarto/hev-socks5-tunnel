@@ -3,8 +3,8 @@ name: Build and Release Hev Socks5 Tunnel
 on:
   push:
     tags:
-      - 'v*' # Memicu rilis otomatis saat kamu push tag versi baru (misal v2.6.1)
-  workflow_dispatch: # Supaya bisa klik tombol "Run" manual dari web GitHub
+      - 'v*' # Memicu rilis otomatis saat kamu push tag versi baru
+  workflow_dispatch: 
 
 jobs:
   build:
@@ -14,7 +14,17 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # --- TARGET LINUX ---
+          # --- TARGET ANDROID (.SO SHARED LIBRARY) ---
+          - os: ubuntu-latest
+            target: android-arm64
+            is_android: true
+            arch_target: aarch64-linux-android24
+          - os: ubuntu-latest
+            target: android-arm32
+            is_android: true
+            arch_target: armv7a-linux-androideabi24
+
+          # --- TARGET LINUX (BINARY) ---
           - os: ubuntu-latest
             target: linux-amd64
             cc: gcc
@@ -35,7 +45,7 @@ jobs:
             cc: aarch64-linux-gnu-gcc
             pkg: gcc-aarch64-linux-gnu
 
-          # --- TARGET MAC O/S (DARWIN) ---
+          # --- TARGET MAC O/S (BINARY) ---
           - os: macos-latest
             target: darwin-x86_64
             cc: clang -target x86_64-apple-macos10.12
@@ -47,45 +57,63 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # PENTING: Hev-socks5 bergantung pada kode eksternal (submodule). Wajib ditarik!
       - name: Checkout Submodules
         run: |
           git submodule update --init --recursive
 
-      # Install tools compiler tambahan jika berjalan di server Ubuntu Linux
       - name: Install Cross-Compilers (Linux)
-        if: matrix.os == 'ubuntu-latest' && matrix.pkg != ''
+        if: matrix.os == 'ubuntu-latest' && matrix.pkg != '' && matrix.is_android != true
         run: |
           sudo apt-get update
           sudo apt-get install -y ${{ matrix.pkg }}
 
-      # Proses kompilasi kode C menggunakan perintah Make bawaan source code
+      # Proses Kompilasi Pintar (Memisahkan .so Android dan Binary Biasa)
       - name: Compile Binary
         run: |
-          make CC="${{ matrix.cc }}"
+          mkdir -p output_dist
           
-          # Rename output file agar rapi dan unik sesuai arsitektur mesinnya
-          if [ -f "bin/hev-socks5-tunnel" ]; then
-            mv bin/hev-socks5-tunnel hev-socks5-tunnel-${{ matrix.target }}
-          elif [ -f "bin/main" ]; then
-            mv bin/main hev-socks5-tunnel-${{ matrix.target }}
+          if [ "${{ matrix.is_android }}" = "true" ]; then
+            # Ambil compiler dari Android NDK bawaan GitHub runner
+            NDK_BIN="$ANDROID_NDK_LATEST_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin"
+            export CC="$NDK_BIN/${{ matrix.arch_target }}-clang"
+            
+            echo "🔧 Compiling Android Shared Library (.so) menggunakan NDK..."
+            # Paksa flags -shared dan -fPIC agar melahirkan file .so
+            make CC="$CC" CFLAGS="-fPIC" LDFLAGS="-shared"
+            
+            # Cari filenya dan bungkus menjadi nama libhev-socks5-tunnel.so
+            if [ -f "bin/hev-socks5-tunnel" ]; then
+              mv bin/hev-socks5-tunnel output_dist/libhev-socks5-tunnel-${{ matrix.target }}.so
+            elif [ -f "bin/main" ]; then
+              mv bin/main output_dist/libhev-socks5-tunnel-${{ matrix.target }}.so
+            else
+              mv hev-socks5-tunnel output_dist/libhev-socks5-tunnel-${{ matrix.target }}.so || true
+            fi
           else
-            # Jika output berada di root folder
-            mv hev-socks5-tunnel hev-socks5-tunnel-${{ matrix.target }} || true
+            # Proses normal untuk Linux & Mac desktop
+            export CC="${{ matrix.cc }}"
+            make CC="$CC"
+            
+            if [ -f "bin/hev-socks5-tunnel" ]; then
+              mv bin/hev-socks5-tunnel output_dist/hev-socks5-tunnel-${{ matrix.target }}
+            elif [ -f "bin/main" ]; then
+              mv bin/main output_dist/hev-socks5-tunnel-${{ matrix.target }}
+            else
+              mv hev-socks5-tunnel output_dist/hev-socks5-tunnel-${{ matrix.target }} || true
+            fi
           fi
 
-      # Simpan hasil compile ke dalam sistem penyimpanan sementara GitHub
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hev-socks5-tunnel-${{ matrix.target }}
-          path: hev-socks5-tunnel-${{ matrix.target }}
+          name: release-${{ matrix.target }}
+          path: output_dist/*
 
   publish:
     name: Create GitHub Release
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') # Hanya membuat rilis asli jika dipicu oleh Tag git
+    if: startsWith(github.ref, 'refs/tags/')
     steps:
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
@@ -93,15 +121,14 @@ jobs:
           path: artifacts/
           merge-multiple: true
 
-      # Satukan semua binari dari bermacam OS tadi dan posting ke halaman Release
       - name: Generate Release Page
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/hev-socks5-tunnel-*
+          files: artifacts/*
           body: |
             ## Hev Socks5 Tunnel Official Release `${{ github.ref_name }}`
-            ✓ Binari multi-platform berhasil dibangun secara otomatis menggunakan GitHub Actions Matrix.
-            ✓ Siap digunakan untuk core perutean VPN/Proxy.
+            ✓ Target Android berhasil di-compile menjadi file **`.so` (Shared Library)**!
+            ✓ Target Desktop (Linux/macOS) berhasil dirakit menjadi file binari eksekutan.
           draft: false
           prerelease: false
         env:
