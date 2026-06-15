@@ -1,0 +1,108 @@
+name: Build and Release Hev Socks5 Tunnel
+
+on:
+  push:
+    tags:
+      - 'v*' # Memicu rilis otomatis saat kamu push tag versi baru (misal v2.6.1)
+  workflow_dispatch: # Supaya bisa klik tombol "Run" manual dari web GitHub
+
+jobs:
+  build:
+    name: Build (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # --- TARGET LINUX ---
+          - os: ubuntu-latest
+            target: linux-amd64
+            cc: gcc
+          - os: ubuntu-latest
+            target: linux-386
+            cc: gcc -m32
+            pkg: gcc-multilib
+          - os: ubuntu-latest
+            target: linux-arm32
+            cc: arm-linux-gnueabi-gcc
+            pkg: gcc-arm-linux-gnueabi
+          - os: ubuntu-latest
+            target: linux-arm32hf
+            cc: arm-linux-gnueabihf-gcc
+            pkg: gcc-arm-linux-gnueabihf
+          - os: ubuntu-latest
+            target: linux-arm64
+            cc: aarch64-linux-gnu-gcc
+            pkg: gcc-aarch64-linux-gnu
+
+          # --- TARGET MAC O/S (DARWIN) ---
+          - os: macos-latest
+            target: darwin-x86_64
+            cc: clang -target x86_64-apple-macos10.12
+          - os: macos-latest
+            target: darwin-arm64
+            cc: clang -target arm64-apple-macos11.0
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # PENTING: Hev-socks5 bergantung pada kode eksternal (submodule). Wajib ditarik!
+      - name: Checkout Submodules
+        run: |
+          git submodule update --init --recursive
+
+      # Install tools compiler tambahan jika berjalan di server Ubuntu Linux
+      - name: Install Cross-Compilers (Linux)
+        if: matrix.os == 'ubuntu-latest' && matrix.pkg != ''
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.pkg }}
+
+      # Proses kompilasi kode C menggunakan perintah Make bawaan source code
+      - name: Compile Binary
+        run: |
+          make CC="${{ matrix.cc }}"
+          
+          # Rename output file agar rapi dan unik sesuai arsitektur mesinnya
+          if [ -f "bin/hev-socks5-tunnel" ]; then
+            mv bin/hev-socks5-tunnel hev-socks5-tunnel-${{ matrix.target }}
+          elif [ -f "bin/main" ]; then
+            mv bin/main hev-socks5-tunnel-${{ matrix.target }}
+          else
+            # Jika output berada di root folder
+            mv hev-socks5-tunnel hev-socks5-tunnel-${{ matrix.target }} || true
+          fi
+
+      # Simpan hasil compile ke dalam sistem penyimpanan sementara GitHub
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hev-socks5-tunnel-${{ matrix.target }}
+          path: hev-socks5-tunnel-${{ matrix.target }}
+
+  publish:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') # Hanya membuat rilis asli jika dipicu oleh Tag git
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      # Satukan semua binari dari bermacam OS tadi dan posting ke halaman Release
+      - name: Generate Release Page
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/hev-socks5-tunnel-*
+          body: |
+            ## Hev Socks5 Tunnel Official Release `${{ github.ref_name }}`
+            ✓ Binari multi-platform berhasil dibangun secara otomatis menggunakan GitHub Actions Matrix.
+            ✓ Siap digunakan untuk core perutean VPN/Proxy.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
