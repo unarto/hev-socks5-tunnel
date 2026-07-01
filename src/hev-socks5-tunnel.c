@@ -703,7 +703,7 @@ hev_socks5_tunnel_stop (void)
         usleep (100 * 1000);
     }
 
-    res = write (fd, &res, 1);
+    res = 0; res = write (fd, &res, 1);
     assert (res > 0 && "socks5 tunnel write event");
 }
 
