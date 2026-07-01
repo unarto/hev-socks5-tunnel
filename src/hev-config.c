@@ -181,7 +181,6 @@ hev_config_parse_socks5 (yaml_document_t *doc, yaml_node_t *base)
     const char *pass = NULL;
     const char *mark = NULL;
     const char *pipe = NULL;
-    const char *tfso = NULL;
 
     if (!base || YAML_MAPPING_NODE != base->type)
         return -1;
@@ -220,8 +219,6 @@ hev_config_parse_socks5 (yaml_document_t *doc, yaml_node_t *base)
             pass = value;
         else if (0 == strcmp (key, "mark"))
             mark = value;
-        else if (0 == strcmp (key, "tcp-fastopen"))
-            tfso = value;
     }
 
     if (!port) {
@@ -260,9 +257,6 @@ hev_config_parse_socks5 (yaml_document_t *doc, yaml_node_t *base)
 
     if (mark)
         srv.mark = strtoul (mark, NULL, 0);
-
-    if (tfso)
-        srv.fastopen = (0 == strcasecmp (tfso, "true")) ? 1 : 0;
 
     return 0;
 }
