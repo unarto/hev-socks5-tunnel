@@ -1,0 +1,54 @@
+name: Compile & Manual Release
+
+on:
+  workflow_dispatch: # Murni manual klik, aman dari bon kuota!
+
+permissions:
+  contents: write # WAJIB! Agar GitHub punya izin bikin rilis otomatis
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      with:
+        submodules: 'recursive'
+        fetch-depth: '0'
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3.2.0
+      with:
+        log-accepted-android-sdk-licenses: false
+        cmdline-tools-version: '13114758'
+        packages: 'platforms;android-36.1 build-tools;36.1.0 platform-tools'
+
+    - name: Install NDK
+      run: |
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          --channel=0 \
+          --install "ndk;26.1.10909125"
+        echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+    - name: Prepare JNI Structure & Build
+      run: |
+        mkdir -p jni
+        cp -r src include third-part conf Android.mk build.mk jni/ 2>/dev/null || true
+        $NDK_HOME/ndk-build NDK_PROJECT_PATH=. APP_ABI="armeabi-v7a arm64-v8a x86 x86_64" APP_PLATFORM=android-21
+
+    - name: Compress JNI Libs to ZIP
+      run: |
+        mv libs jniLibs
+        zip -r hev-socks5-tunnel-libs.zip jniLibs
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: "v1.0.${{ github.run_number }}"
+        name: "Release Build #${{ github.run_number }}"
+        body: |
+          Hasil compile manual `hev-socks5-tunnel` langsung jadi rilis permanen.
+          Format: `.zip` berisi folder `jniLibs` tinggal copas ke project target.
+        files: |
+          hev-socks5-tunnel-libs.zip
